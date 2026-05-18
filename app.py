@@ -3,13 +3,14 @@ from flask import Flask, render_template, request, redirect, url_for, jsonify
 
 app = Flask(__name__)
 
+
 def get_db_connection():
     return mysql.connector.connect(
-        host="localhost",
+        host="crossover.proxy.rlwy.net",
+        port=48269,
         user="root",
-        password="",
-        database="drowsiness",
-        port=3308
+        password="tPMJyVojazmPjQAzbMSovbBGtgupaIOp",
+        database="railway"
     )
 
 @app.route("/", methods=["GET", "POST"])
