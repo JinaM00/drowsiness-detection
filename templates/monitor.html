@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="monitor-page">
+<div class="container monitor-container">
+    <h1>AI Drowsiness Monitor</h1>
+    <h2>Welcome, {{ username }}</h2>
+
+    <div class="video-container">
+        <video id="video" autoplay playsinline></video>
+    </div>
+
+    <div class="controls-row">
+    <p id="status">Status: Monitoring...</p>
+    <button type="button" id="toggleCameraBtn">Stop</button>
+</div>
+
+    <a href="{{ url_for('index') }}" class="back-link">
+    <button type="button">Back</button>
+    </a>
+</div>
+
+<script>
+const carPlateNb = "{{ car_plate_nb }}";
+</script>
+
+<script type="module">
+import { FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs";
+
+const video = document.getElementById("video");
+const statusText = document.getElementById("status");
+const container = document.querySelector(".video-container");
+const toggleCameraBtn = document.getElementById("toggleCameraBtn");
+toggleCameraBtn.classList.add("stop-btn");
+
+let faceLandmarker;
+let running = false;
+let stream = null;
+let eyeClosedFrames = 0;
+const thresholdFrames = 10;
+let alarmPlaying = false;
+let lastStatus = "Awake";
+
+const alarm = new Audio("/static/alarm.mp3");
+
+const LEFT_EYE = [33, 160, 158, 133, 153, 144];
+const RIGHT_EYE = [362, 385, 387, 263, 373, 380];
+
+function distance(a, b) {
+    const dx = a.x - b.x;
+    const dy = a.y - b.y;
+    return Math.sqrt(dx * dx + dy * dy);
+}
+
+function eyeAspectRatio(landmarks, eye) {
+    const p1 = landmarks[eye[0]];
+    const p2 = landmarks[eye[1]];
+    const p3 = landmarks[eye[2]];
+    const p4 = landmarks[eye[3]];
+    const p5 = landmarks[eye[4]];
+    const p6 = landmarks[eye[5]];
+
+    const vertical1 = distance(p2, p5);
+    const vertical2 = distance(p3, p6);
+    const horizontal = distance(p1, p4);
+
+    return (vertical1 + vertical2) / (2.0 * horizontal);
+}
+
+function playAlert() {
+    if (alarmPlaying) return;
+
+    alarmPlaying = true;
+    alarm.currentTime = 0;
+
+    alarm.play().catch((error) => {
+        console.error("Audio play error:", error);
+    });
+}
+
+function stopAlert() {
+    alarm.pause();
+    alarm.currentTime = 0;
+    alarmPlaying = false;
+}
+
+function updateStatus(text, className, alertOn = false) {
+    statusText.innerText = text;
+    statusText.className = className;
+
+    if (alertOn) {
+        container.classList.add("alert");
+    } else {
+        container.classList.remove("alert");
+    }
+}
+
+function sendStatus(status) {
+    fetch("/log", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+            car_plate_nb: carPlateNb,
+            status: status
+        })
+    });
+}
+
+async function setupCamera() {
+    stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: false
+    });
+
+    video.srcObject = stream;
+
+    return new Promise((resolve) => {
+        video.onloadedmetadata = () => resolve();
+    });
+}
+
+async function stopCamera() {
+    if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        stream = null;
+    }
+
+    video.srcObject = null;
+    running = false;
+    stopAlert();
+    eyeClosedFrames = 0;
+    lastStatus = "Awake";
+
+    updateStatus("Status: Camera Stopped", "awake", false);
+    toggleCameraBtn.textContent = "Start";
+    toggleCameraBtn.classList.remove("stop-btn");
+    toggleCameraBtn.classList.add("start-btn");
+}
+
+async function startCameraAndDetection() {
+    try {
+        await setupCamera();
+        running = true;
+        toggleCameraBtn.textContent = "Stop";
+        toggleCameraBtn.classList.remove("start-btn");
+        toggleCameraBtn.classList.add("stop-btn");
+        updateStatus("Status: Monitoring...", "awake", false);
+        predictLoop();
+    } catch (error) {
+        console.error(error);
+        updateStatus("Could not access camera", "drowsy", false);
+    }
+}
+
+async function setupFaceLandmarker() {
+    const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+    );
+
+    faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+        baseOptions: {
+            modelAssetPath: "/static/models/face_landmarker.task"
+        },
+        runningMode: "VIDEO",
+        numFaces: 1
+    });
+}
+
+async function predictLoop() {
+    if (!running || !faceLandmarker || !video.srcObject) return;
+
+    const results = faceLandmarker.detectForVideo(video, performance.now());
+
+    if (results.faceLandmarks && results.faceLandmarks.length > 0) {
+        const landmarks = results.faceLandmarks[0];
+
+        const leftEAR = eyeAspectRatio(landmarks, LEFT_EYE);
+        const rightEAR = eyeAspectRatio(landmarks, RIGHT_EYE);
+        const avgEAR = (leftEAR + rightEAR) / 2;
+
+        if (avgEAR < 0.42) {
+            eyeClosedFrames++;
+        } else {
+            eyeClosedFrames = 0;
+        }
+
+        if (eyeClosedFrames >= thresholdFrames) {
+            updateStatus(
+                `Status: Drowsy! | EAR: ${avgEAR.toFixed(3)} `,
+                "drowsy",
+                true
+            );
+
+            if (lastStatus !== "Drowsy") {
+                playAlert();
+                sendStatus("Drowsy");
+                lastStatus = "Drowsy";
+            }
+        } else {
+            updateStatus(
+                `Status: Awake | EAR: ${avgEAR.toFixed(3)} `,
+                "awake",
+                false
+            );
+
+            if (lastStatus === "Drowsy") {
+                stopAlert();
+            }
+
+            if (lastStatus !== "Awake") {
+                sendStatus("Awake");
+                lastStatus = "Awake";
+            }
+        }
+    } else {
+        updateStatus("Status: No face detected", "drowsy", false);
+        eyeClosedFrames = 0;
+
+        if (lastStatus === "Drowsy") {
+            stopAlert();
+        }
+
+        lastStatus = "Awake";
+    }
+
+    requestAnimationFrame(predictLoop);
+}
+
+toggleCameraBtn.addEventListener("click", async function() {
+    if (running) {
+        await stopCamera();
+    } else {
+        await startCameraAndDetection();
+    }
+});
+
+async function start() {
+    try {
+        await setupFaceLandmarker();
+        await startCameraAndDetection();
+    } catch (error) {
+        console.error(error);
+        updateStatus("Could not start model or camera", "drowsy", false);
+    }
+}
+
+start();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Drowsiness Detection</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="container">
+    <h1>Drowsiness Detection System</h1>
+
+    {% if error %}
+        <p id="errorMessage">{{ error }}</p>
+    {% endif %}
+
+    <form method="POST" id="userForm">
+        <input type="text" name="car_plate_nb" id="car_plate_nb" placeholder="Car Plate Number" required>
+
+        <div id="signupFields">
+            <div class="name-row">
+                <input type="text" name="first_name" id="first_name" placeholder="First Name">
+                <input type="text" name="last_name" id="last_name" placeholder="Last Name">
+            </div>
+
+            <input type="text" name="car_model" id="car_model" placeholder="Car Model">
+        </div>
+
+        <input type="hidden" name="form_type" id="form_type" value="signin">
+
+        <button type="submit" id="mainButton">Sign In</button>
+    </form>
+
+    <p id="toggleText">
+        If you are not registered, click here to Sign Up
+    </p>
+</div>
+
+<script>
+const toggleText = document.getElementById("toggleText");
+const signupFields = document.getElementById("signupFields");
+const mainButton = document.getElementById("mainButton");
+const formType = document.getElementById("form_type");
+
+const firstName = document.getElementById("first_name");
+const lastName = document.getElementById("last_name");
+
+let signupMode = false;
+
+signupFields.style.display = "none";
+signupFields.style.opacity = "0";
+signupFields.style.transform = "translateY(-10px)";
+
+toggleText.addEventListener("click", function() {
+    signupMode = !signupMode;
+
+    if (signupMode) {
+        signupFields.style.display = "flex";
+
+        setTimeout(() => {
+            signupFields.style.opacity = "1";
+            signupFields.style.transform = "translateY(0)";
+        }, 10);
+
+        mainButton.textContent = "Sign Up";
+        formType.value = "signup";
+        toggleText.textContent = "Already registered? Click here to Sign In";
+
+        firstName.required = true;
+        lastName.required = true;
+    } else {
+        signupFields.style.opacity = "0";
+        signupFields.style.transform = "translateY(-10px)";
+
+        setTimeout(() => {
+            signupFields.style.display = "none";
+        }, 300);
+
+        mainButton.textContent = "Sign In";
+        formType.value = "signin";
+        toggleText.textContent = "If you are not registered, click here to Sign Up";
+
+        firstName.required = false;
+        lastName.required = false;
+    }
+});
+</script>
+
+<script>
+const errorMessage = document.getElementById("errorMessage");
+
+if (errorMessage) {
+    setTimeout(() => {
+        errorMessage.style.display = "none";
+    }, 6000);
+}
+</script>
+
+</body>
+</html>
